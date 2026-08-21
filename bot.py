@@ -32,7 +32,15 @@ async def cmd_start(message: types.Message):
 async def get_id(msg: types.Message):
     await msg.reply(f"File ID: `{msg.video.file_id}`", parse_mode="Markdown")
 
-# --- Mini App ডাটা রিসিভার (টাইটেলসহ) ---
+# --- ডিলিট ফাংশন ---
+async def delete_after(chat_id, message_id, minutes):
+    await asyncio.sleep(minutes * 60)
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except:
+        pass
+
+# --- Mini App ডাটা রিসিভার ---
 @dp.message(F.web_app_data)
 async def handle_webapp_data(message: types.Message):
     try:
@@ -40,19 +48,27 @@ async def handle_webapp_data(message: types.Message):
         
         if data.get("action") == "send_video":
             file_id = data.get("file_id")
-            video_title = data.get("video_title", "Viral Video") # টাইটেল নেওয়া হচ্ছে
-            success_msg = data.get("custom_message", "✅ ভিডিও আনলক সফল!") # এডমিন মেসেজ
+            video_title = data.get("video_title", "Viral Video")
+            success_msg = data.get("custom_message", "✅ ভিডিও আনলক সফল!")
+            protect = data.get("protect_content", True)
+            del_timer = data.get("delete_timer", 0) # মিনিটে
             
-            # টাইটেল এবং সাকসেস মেসেজ একসাথে ক্যাপশন হিসেবে তৈরি
             final_caption = f"🎬 **{video_title}**\n\n{success_msg}"
-            
-            await bot.send_video(
+            if del_timer > 0:
+                final_caption += f"\n\n⏰ এই ভিডিওটি {del_timer} মিনিট পর অটো ডিলিট হয়ে যাবে।"
+
+            sent_msg = await bot.send_video(
                 chat_id=message.chat.id, 
                 video=file_id, 
                 caption=final_caption, 
                 
-                protect_content=True 
+                protect_content=protect
             )
+            
+            # যদি টাইম সেট করা থাকে তবে ডিলিট শিডিউল হবে
+            if del_timer > 0:
+                asyncio.create_task(delete_after(message.chat.id, sent_msg.message_id, del_timer))
+                
             logging.info(f"Video '{video_title}' sent to {message.chat.id}")
             
     except Exception as e:
