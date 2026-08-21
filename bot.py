@@ -50,7 +50,7 @@ async def handle_webapp_data(message: types.Message):
                 video=file_id, 
                 caption=msg,
                 
-                protect_content=True # ফরোয়ার্ড বন্ধ
+                protect_content=False # ফরোয়ার্ড বন্ধ
             )
     except Exception as e:
         await message.answer(f"⚠️ ভুল File ID!\nসার্ভার মেসেজ: {e}")
