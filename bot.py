@@ -44,9 +44,11 @@ async def handle_webapp_data(message: types.Message):
             file_id = data.get("file_id")
             # ভিডিও সেন্ড করার চেষ্টা
             await bot.send_video(chat_id=message.chat.id, video=file_id, caption="✅ ভিডিও আনলক সফল!",
-                                parse_mode="Markdown",
-                                
-                                protect_content=True)
+																
+																parse_mode="Markdown",
+																caption=data.get("custom_message", "✅ ভিডিও আনলক সফল!"),
+																protect_content=True 
+																)
     except Exception as e:
         await message.answer(f"⚠️ ভুল File ID ব্যবহার করা হয়েছে!\nসার্ভার মেসেজ: {e}")
 
