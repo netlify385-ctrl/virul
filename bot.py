@@ -14,8 +14,8 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# Render Web Server (To keep bot alive)
-async def handle(request): return web.Response(text="Bot Alive")
+# Render Web Server
+async def handle(request): return web.Response(text="Bot is Active")
 async def start_web_server():
     app = web.Application()
     app.router.add_get('/', handle)
@@ -23,37 +23,41 @@ async def start_web_server():
     await runner.setup()
     await web.TCPSite(runner, '0.0.0.0', 8080).start()
 
-# /start কমান্ড
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
     kb = [[KeyboardButton(text="🚀 Open Viral App", web_app=WebAppInfo(url=MINI_APP_URL))]]
     await message.answer("ভিডিও আনলক করতে নিচের বাটনে ক্লিক করুন:", reply_markup=ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True))
 
-# ফাইল আইডি পাওয়ার জন্য ফিচার
 @dp.message(F.video)
-async def get_video_file_id(message: types.Message):
-    file_id = message.video.file_id
-    await message.reply(f"✅ File ID:\n\n`{file_id}`", parse_mode="Markdown")
+async def get_id(msg: types.Message):
+    await msg.reply(f"File ID: `{msg.video.file_id}`", parse_mode="Markdown")
 
-# Mini App ডাটা রিসিভার
+# --- Mini App ডাটা রিসিভার (টাইটেলসহ) ---
 @dp.message(F.web_app_data)
 async def handle_webapp_data(message: types.Message):
     try:
         data = json.loads(message.web_app_data.data)
+        
         if data.get("action") == "send_video":
             file_id = data.get("file_id")
-            # অ্যাডমিন থেকে আসা কাস্টম মেসেজ
-            msg = data.get("custom_message", "✅ ভিডিও আনলক সফল!")
+            video_title = data.get("video_title", "Viral Video") # টাইটেল নেওয়া হচ্ছে
+            success_msg = data.get("custom_message", "✅ ভিডিও আনলক সফল!") # এডমিন মেসেজ
+            
+            # টাইটেল এবং সাকসেস মেসেজ একসাথে ক্যাপশন হিসেবে তৈরি
+            final_caption = f"🎬 **{video_title}**\n\n{success_msg}"
             
             await bot.send_video(
                 chat_id=message.chat.id, 
                 video=file_id, 
-                caption=msg,
+                caption=final_caption, 
                 
-                protect_content=False # ফরোয়ার্ড বন্ধ
+                protect_content=True 
             )
+            logging.info(f"Video '{video_title}' sent to {message.chat.id}")
+            
     except Exception as e:
-        await message.answer(f"⚠️ ভুল File ID!\nসার্ভার মেসেজ: {e}")
+        logging.error(f"Error: {e}")
+        await message.answer(f"⚠️ সমস্যা হয়েছে! ভিডিওর File ID চেক করুন।")
 
 async def main():
     await asyncio.gather(dp.start_polling(bot), start_web_server())
