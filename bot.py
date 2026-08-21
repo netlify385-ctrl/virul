@@ -49,7 +49,7 @@ async def handle_webapp_data(message: types.Message):
                 chat_id=message.chat.id, 
                 video=file_id, 
                 caption=msg,
-                parse_mode="Markdown",
+                
                 protect_content=True # ফরোয়ার্ড বন্ধ
             )
     except Exception as e:
