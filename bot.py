@@ -3,34 +3,40 @@ import logging
 import asyncio
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
+from aiogram.types import ReplyKeyboardRemove
 from aiohttp import web
 
 # --- সেটিংস ---
-API_TOKEN = '8799274180:AAGP9lLvWNWv4NsuL_B37iOKBDnnWlNOUp4' 
-MINI_APP_URL = 'https://newbogpostb.blogspot.com/?m=0'
+API_TOKEN = '8799274180:AAGP9lLvWNWv4NsuL_B37iOKBDnnWlNOUp4'
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# --- ভিডিও অটো ডিলিট ফাংশন ---
+# --- ভিডিও অটো ডিলিট লজিক ---
 async def delete_after(chat_id, message_id, minutes):
     await asyncio.sleep(minutes * 60)
     try:
         await bot.delete_message(chat_id, message_id)
-        logging.info(f"Message {message_id} deleted in {chat_id}")
     except:
         pass
 
-# --- মেনু বাটন সাপোর্ট করার জন্য API সিস্টেম ---
+# --- API সিস্টেম (CORS ফিক্সড) ---
 async def unlock_api_handler(request):
+    # CORS প্রি-ফ্লাইট রিকোয়েস্ট হ্যান্ডেল করা
+    if request.method == "OPTIONS":
+        return web.Response(status=200, headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+        })
+
     try:
         data = await request.json()
         user_id = data.get("user_id")
         file_id = data.get("file_id")
         title = data.get("title", "Viral Video")
-        msg = data.get("msg", "✅ আনলক সফল!")
+        msg = data.get("msg", "✅ ভিডিও আনলক সফল!")
         protect = data.get("protect", True)
         timer = data.get("timer", 0)
 
@@ -40,9 +46,9 @@ async def unlock_api_handler(request):
                 caption += f"\n\n⏰ এই ভিডিওটি {timer} মিনিট পর অটো ডিলিট হয়ে যাবে।"
 
             sent = await bot.send_video(
-                chat_id=user_id, 
-                video=file_id, 
-                caption=caption, 
+                chat_id=user_id,
+                video=file_id,
+                caption=caption,
                 
                 protect_content=protect
             )
@@ -50,29 +56,38 @@ async def unlock_api_handler(request):
             if timer > 0:
                 asyncio.create_task(delete_after(user_id, sent.message_id, timer))
                 
-            return web.json_response({"status": "ok"})
-        return web.json_response({"status": "error", "message": "Missing Data"})
+            return web.json_response({"status": "ok"}, headers={"Access-Control-Allow-Origin": "*"})
+        
+        return web.json_response({"status": "error", "message": "Data Missing"}, status=400, headers={"Access-Control-Allow-Origin": "*"})
     except Exception as e:
-        return web.json_response({"status": "error", "error": str(e)})
+        logging.error(f"API Error: {e}")
+        return web.json_response({"status": "error", "error": str(e)}, status=500, headers={"Access-Control-Allow-Origin": "*"})
 
-async def handle_alive(request): return web.Response(text="Bot is Running")
+async def handle_alive(request):
+    return web.Response(text="Bot is Running")
 
 async def start_web_server():
     app = web.Application()
     app.router.add_get('/', handle_alive)
     app.router.add_post('/api/unlock', unlock_api_handler)
+    app.router.add_options('/api/unlock', unlock_api_handler) # OPTIONS রিকোয়েস্টের জন্য
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, '0.0.0.0', 8080).start()
 
+# /start কমান্ড (বাটন রিমুভ করা হয়েছে)
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
-    await message.answer("স্বাগতম! ভিডিও দেখতে মেনু বাটন বা নিচের বাটন থেকে অ্যাপ ওপেন করুন।", 
-    reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Watch 📺", web_app=WebAppInfo(url=MINI_APP_URL))]], resize_keyboard=True))
+    # ReplyKeyboardRemove() দিয়ে আগের বাটনগুলো মুছে ফেলা হয়েছে
+    await message.answer(
+        "স্বাগতম! ভিডিও দেখতে সরাসরি মেনু বাটন থেকে অ্যাপটি ওপেন করুন।",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
+# File ID সংগ্রহকারী
 @dp.message(F.video)
 async def get_id(msg: types.Message):
-    await msg.reply(f"✅ Correct File ID:\n\n`{msg.video.file_id}`", parse_mode="Markdown")
+    await msg.reply(f"✅ Video File ID:\n\n`{msg.video.file_id}`", parse_mode="Markdown")
 
 async def main():
     await asyncio.gather(dp.start_polling(bot), start_web_server())
