@@ -2,108 +2,105 @@ import json
 import logging
 import asyncio
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import CommandStart
-from aiogram.types import ReplyKeyboardRemove
+from aiogram.filters import CommandStart, Command
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, InputMediaPhoto
 from aiohttp import web
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 # --- সেটিংস ---
 API_TOKEN = '8799274180:AAGP9lLvWNWv4NsuL_B37iOKBDnnWlNOUp4'
+MINI_APP_URL = 'https://newbogpostb.blogspot.com/?m=0'
+ADMIN_ID = 8835355994  # আপনার নিজের টেলিগ্রাম আইডি দিন (আইডি পেতে @userinfobot এ মেসেজ দিন)
+BOT_USER = 'virul_link_bot' # আপনার বটের ইউজারনেম (@ ছাড়া)
 
+# ফায়ারবেস (এটি শুধু আইডিগুলো মনে রাখার জন্য, আপনাকে কিছু করতে হবে না)
+if not firebase_admin._apps:
+    cred = credentials.ApplicationDefault()
+    firebase_admin.initialize_app(cred, {'projectId': 'virul-923ca'})
+
+db = firestore.client()
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# গ্লোবাল ডিকশনারি গ্রুপ ভিডিও প্রসেসিং এর জন্য
-album_cache = {}
+# --- ব্রডকাস্ট সিস্টেম (আপনার স্ক্রিনশটের মতো পোস্ট করার জন্য) ---
+# ব্যবহারের নিয়ম: ২-৩টি ছবি সিলেক্ট করুন, ক্যাপশনে লিখুন /post VideoID টাইটেল
+@dp.message(Command("post"))
+async def cmd_post(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
 
-# --- ভিডিও আইডি কালেক্টর লজিক ---
-@dp.message(F.video)
-async def handle_video_input(message: types.Message):
-    # যদি ভিডিওটি অ্যালবামের (Group) অংশ হয়
-    if message.media_group_id:
-        gid = message.media_group_id
-        if gid not in album_cache:
-            album_cache[gid] = []
-            asyncio.create_task(process_group_ids(message.chat.id, gid))
-        
-        album_cache[gid].append(message.video.file_id)
+    # কমান্ড থেকে তথ্য নেওয়া (উদা: /post 9FDW8 ভিডিও টাইটেল)
+    args = message.text.replace("/post", "").strip().split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer("⚠️ নিয়ম: `/post ভিডিও_আইডি পোস্টের_লেখা` লিখে ছবিসহ পাঠান।", parse_mode="Markdown")
         return
 
-    # যদি সিঙ্গেল ভিডিও হয়
-    await message.reply(f"✅ **Single Video ID:**\n\n`{message.video.file_id}`", parse_mode="Markdown")
-
-# গ্রুপ ভিডিওকে একটি মাস্টার আইডিতে রূপান্তর করার ফাংশন
-async def process_group_ids(chat_id, gid):
-    await asyncio.sleep(2) # সব ভিডিও রিসিভ করার জন্য সময়
-    if gid in album_cache:
-        ids = album_cache[gid]
-        # সব আইডিকে কমা (,) দিয়ে জোড়া লাগিয়ে একটি মাস্টার আইডি তৈরি
-        master_id = ",".join(ids)
-        
-        response = f"📦 **Group Video Pack Created!**\n\nনিচে এই গ্রুপের জন্য একটি **Master ID** দেওয়া হলো। এটি কপি করে অ্যাডমিন প্যানেলে 'File ID' বক্সে বসান। ইউজার আনলক করলে এই গ্রুপের {len(ids)}টি ভিডিওই পেয়ে যাবে।\n\n`{master_id}`"
-        
-        await bot.send_message(chat_id, response, parse_mode="Markdown")
-        del album_cache[gid]
-
-# --- API সিস্টেম (মাল্টি-ভিডিও সাপোর্ট সহ) ---
-async def unlock_api_handler(request):
-    if request.method == "OPTIONS":
-        return web.Response(status=200, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type"})
+    v_id = args[0]
+    caption_text = args[1]
     
+    # ডাইনামিক লিঙ্ক তৈরি
+    app_link = f"https://t.me/{BOT_USER}/?startapp={v_id}"
+    
+    final_caption = f"{caption_text}\n\n🎬 **ফুল ভিডিও লিঙ্ক** 👇\n{app_link}"
+
+    # সব ইউজার আইডি আনা
+    users = db.collection("bot_users").stream()
+    count = 0
+
+    for user in users:
+        try:
+            # একক ছবি বা শুধু টেক্সট হলে
+            await bot.send_message(chat_id=user.id, text=final_caption, parse_mode="Markdown")
+            count += 1
+            await asyncio.sleep(0.05)
+        except: continue
+
+    await message.answer(f"✅ সফলভাবে {count} জন ইউজারের কাছে পোস্ট পাঠানো হয়েছে।")
+
+# --- ইউজার আইডি অটো সেভ (যাতে বট জানে কাকে পাঠাতে হবে) ---
+@dp.message(CommandStart())
+async def cmd_start(message: types.Message):
+    db.collection("bot_users").document(str(message.chat.id)).set({"u": True})
+    
+    # নিচের বাটনটি স্ক্রিনশটের মতো সেট করা
+    kb = [[KeyboardButton(text="ভিডিও দেখুন 🥵", web_app=WebAppInfo(url=MINI_APP_URL))]]
+    await message.answer(
+        "স্বাগতম! ভিডিও দেখতে সরাসরি নিচের বাটন থেকে অ্যাপটি ওপেন করুন।",
+        reply_markup=ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+    )
+
+# --- বাকি API এবং লজিক (আগের মতো) ---
+async def unlock_api_handler(request):
     try:
         data = await request.json()
-        user_id = data.get("user_id")
-        master_file_id = data.get("file_id") # এটি সিঙ্গেল আইডি বা কমা দেওয়া মাস্টার আইডি হতে পারে
-        title = data.get("title", "Premium Video")
-        msg = data.get("msg", "✅ ভিডিও আনলক সফল!")
-        protect = data.get("protect", True)
-        timer = data.get("timer", 0)
-
-        if user_id and master_file_id:
-            # চেক করা হচ্ছে এটি কি মাস্টার আইডি (গ্রুপ)?
-            file_ids = master_file_id.split(",")
-            
-            # ইউজারকে ভিডিও পাঠানো (লুপের মাধ্যমে)
-            for i, fid in enumerate(file_ids):
-                # প্রথম ভিডিওর সাথে টাইটেল এবং মেসেজ যাবে
-                caption = f"🎬 **{title}** (Part {i+1})\n\n{msg}" if len(file_ids) > 1 else f"🎬 **{title}**\n\n{msg}"
-                
-                sent = await bot.send_video(
-                    chat_id=user_id, 
-                    video=fid, 
-                    caption=caption, 
-                    
-                    protect_content=protect
-                )
-                
-                # অটো ডিলিট সেট করা থাকলে
-                if timer > 0:
-                    asyncio.create_task(delete_after(user_id, sent.message_id, timer))
-                
-                # এক ভিডিও থেকে অন্য ভিডিও পাঠানোর মাঝে ছোট বিরতি (টেলিগ্রাম লিমিট এড়াতে)
+        u_id, f_id, title, msg, prt, tmr = data.get("user_id"), data.get("file_id"), data.get("title"), data.get("msg"), data.get("protect"), data.get("timer")
+        if u_id and f_id:
+            ids = f_id.split(",")
+            for fid in ids:
+                cap = f"🎬 **{title}**\n\n{msg}"
+                if tmr > 0: cap += f"\n\n⏰ ডিলিট হবে {tmr} মিনিট পর।"
+                s = await bot.send_video(chat_id=u_id, video=fid, caption=cap, parse_mode="Markdown", protect_content=prt)
+                if tmr > 0: asyncio.create_task(delete_after(u_id, s.message_id, tmr))
                 await asyncio.sleep(0.5)
-
             return web.json_response({"status": "ok"}, headers={"Access-Control-Allow-Origin": "*"})
-    except Exception as e:
-        return web.json_response({"status": "error", "error": str(e)}, status=500, headers={"Access-Control-Allow-Origin": "*"})
-
-async def delete_after(chat, msg_id, mins):
-    await asyncio.sleep(mins * 60)
-    try: await bot.delete_message(chat, msg_id)
     except: pass
+    return web.json_response({"status": "error"}, status=500, headers={"Access-Control-Allow-Origin": "*"})
 
-async def handle_alive(request): return web.Response(text="Bot is Active")
+async def delete_after(c, m, t):
+    await asyncio.sleep(t * 60)
+    try: await bot.delete_message(c, m)
+    except: pass
 
 async def start_web_server():
     app = web.Application()
-    app.router.add_get('/', handle_alive)
     app.router.add_post('/api/unlock', unlock_api_handler)
-    app.router.add_options('/api/unlock', unlock_api_handler)
+    app.router.add_options('/api/unlock', lambda r: web.Response(headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type"}))
     await web.TCPSite(web.AppRunner(app), '0.0.0.0', 8080).start()
 
-@dp.message(CommandStart())
-async def cmd_start(message: types.Message):
-    await message.answer("স্বাগতম! ভিডিও দেখতে মেনু বাটন থেকে অ্যাপ ওপেন করুন।", reply_markup=ReplyKeyboardRemove())
+@dp.message(F.video)
+async def get_id(msg: types.Message):
+    await msg.reply(f"ID: `{msg.video.file_id}`", parse_mode="Markdown")
 
 async def main():
     await asyncio.gather(dp.start_polling(bot), start_web_server())
