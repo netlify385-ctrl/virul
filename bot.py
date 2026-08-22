@@ -4,7 +4,7 @@ import asyncio
 import os
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
-from aiogram.types import ReplyKeyboardRemove, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
+from aiogram.types import ReplyKeyboardRemove
 from aiohttp import web
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -15,15 +15,20 @@ MINI_APP_URL = 'https://newbogpostb.blogspot.com/?m=0'
 ADMIN_ID = 8835355994 
 BOT_USER = 'virul_link_bot'
 
-# ফায়ারবেস ইনিশিয়ালাইজেশন (রেন্ডারের জন্য ফিক্সড)
-if not firebase_admin._apps:
-    # এখানে শুধুমাত্র প্রোজেক্ট আইডি দিয়ে শুরু করার চেষ্টা করা হচ্ছে
-    firebase_admin.initialize_app(options={'projectId': 'virul-923ca'})
-
-db = firestore.client()
+# লগিং সেটআপ
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
+
+# --- ফায়ারবেস ফিক্সড কানেকশন ---
+try:
+    if not firebase_admin._apps:
+        # শুধুমাত্র প্রোজেক্ট আইডি দিয়ে রেন্ডারে কানেক্ট করার জন্য এটিই বেস্ট
+        firebase_admin.initialize_app(options={'projectId': 'virul-923ca'})
+    db = firestore.client()
+    logging.info("✅ Firebase Connected Successfully!")
+except Exception as e:
+    logging.error(f"❌ Firebase Connection Error: {e}")
 
 # --- ব্রডকাস্ট সিস্টেম ---
 @dp.message(Command("post"))
@@ -36,6 +41,7 @@ async def cmd_broadcast(message: types.Message):
     video_id, msg_body = args[0], args[1]
     app_link = f"https://t.me/{BOT_USER}/app?startapp={video_id}"
     final_caption = f"{msg_body}\n\n🎬 **ফুল ভিডিও লিঙ্ক** 👇\n{app_link}"
+    
     users_ref = db.collection("bot_users").stream()
     for user in users_ref:
         try:
@@ -43,16 +49,18 @@ async def cmd_broadcast(message: types.Message):
             else: await bot.send_message(chat_id=user.id, text=final_caption, parse_mode="Markdown")
             await asyncio.sleep(0.05)
         except: continue
-    await message.answer("✅ সফল!")
+    await message.answer("✅ ব্রডকাস্ট সফল!")
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
-    db.collection("bot_users").document(str(message.chat.id)).set({"u": True}, merge=True)
-    await message.answer("স্বাগতম! ভিডিও দেখতে মেনু বা বাটন ব্যবহার করুন।", reply_markup=ReplyKeyboardRemove())
+    # ইউজার আইডি সেভ করা
+    try:
+        db.collection("bot_users").document(str(message.chat.id)).set({"u": True}, merge=True)
+    except: pass
+    await message.answer("স্বাগতম! ভিডিও দেখতে সরাসরি মেনু বাটন থেকে অ্যাপটি ওপেন করুন।", reply_markup=ReplyKeyboardRemove())
 
 # --- API সিস্টেম ---
 async def unlock_api_handler(request):
-    if request.method == "OPTIONS": return web.Response(status=200, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type"})
     try:
         data = await request.json()
         u_id, f_id, title, msg, prt, tmr = data.get("user_id"), data.get("file_id"), data.get("title"), data.get("msg"), data.get("protect"), data.get("timer")
@@ -60,33 +68,40 @@ async def unlock_api_handler(request):
             for fid in f_id.split(","):
                 cap = f"🎬 **{title}**\n\n{msg}"
                 s = await bot.send_video(chat_id=u_id, video=fid, caption=cap, protect_content=prt)
-                if tmr > 0: asyncio.create_task(delete_after(u_id, s.message_id, tmr))
+                if tmr and int(tmr) > 0: asyncio.create_task(delete_after(u_id, s.message_id, int(tmr)))
             return web.json_response({"status": "ok"}, headers={"Access-Control-Allow-Origin": "*"})
-    except: pass
-    return web.json_response({"status": "error"}, status=500, headers={"Access-Control-Allow-Origin": "*"})
+    except Exception as e:
+        logging.error(f"API Error: {e}")
+    return web.json_response({"status": "error"}, headers={"Access-Control-Allow-Origin": "*"})
 
 async def delete_after(c, m, t):
     await asyncio.sleep(t * 60)
     try: await bot.delete_message(c, m)
     except: pass
 
-# --- Render Web Server (Port ফিক্স) ---
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get('/', lambda r: web.Response(text="Running"))
-    app.router.add_post('/api/unlock', unlock_api_handler)
-    app.router.add_options('/api/unlock', unlock_api_handler)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    # Render-এর দেওয়া PORT ব্যবহার করা হচ্ছে
-    port = int(os.environ.get("PORT", 8080))
-    await web.TCPSite(runner, '0.0.0.0', port).start()
-
 @dp.message(F.video)
 async def get_id(msg: types.Message): await msg.reply(f"ID: `{msg.video.file_id}`", parse_mode="Markdown")
 
+# --- Render Web Server (এটির কারণে Port Error আসছিল) ---
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', lambda r: web.Response(text="Bot is Running"))
+    app.router.add_post('/api/unlock', unlock_api_handler)
+    app.router.add_options('/api/unlock', lambda r: web.Response(headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type"}))
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    # Render-এর জন্য এই পোর্ট বাইন্ডিংটা সবচেয়ে জরুরি
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logging.info(f"✅ Web Server started on port {port}")
+
 async def main():
-    await asyncio.gather(dp.start_polling(bot), start_web_server())
+    # বট এবং ওয়েব সার্ভার একসাথে চালু করা
+    server_task = asyncio.create_task(start_web_server())
+    bot_task = asyncio.create_task(dp.start_polling(bot))
+    await asyncio.gather(server_task, bot_task)
 
 if __name__ == "__main__":
     asyncio.run(main())
