@@ -7,7 +7,7 @@ from aiogram.types import ReplyKeyboardRemove
 from aiohttp import web
 
 # --- সেটিংস ---
-API_TOKEN = '8799274180:AAGP9lLvWNWv4NsuL_B37iOKBDnnWlNOUp4'
+API_TOKEN = '8799274180:AAHf2hgnuNr0PkpA-mErZnp0jiEYIm8Nsjc'
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
