@@ -59,7 +59,7 @@ async def unlock_api_handler(request):
         if u_id and f_id:
             for fid in f_id.split(","):
                 cap = f"🎬 **{title}**\n\n{msg}"
-                s = await bot.send_video(chat_id=u_id, video=fid, caption=cap, parse_mode="Markdown", protect_content=prt)
+                s = await bot.send_video(chat_id=u_id, video=fid, caption=cap, protect_content=prt)
                 if tmr > 0: asyncio.create_task(delete_after(u_id, s.message_id, tmr))
             return web.json_response({"status": "ok"}, headers={"Access-Control-Allow-Origin": "*"})
     except: pass
